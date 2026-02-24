@@ -1,0 +1,8 @@
+{
+  "prettier.prettierPath": "./node_modules/prettier/index.mjs",
+  "prettier.enableDebugLogs": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  }
+}
