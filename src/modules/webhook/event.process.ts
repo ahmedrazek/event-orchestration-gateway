@@ -21,6 +21,7 @@ export class EventProcessor extends WorkerHost {
   }
 
   async process(job: Job<EventDto>) {
+    await this.webhookService.routingEvent(job.data);
     return this.webhookService.processEvent(job.data);
   }
 
