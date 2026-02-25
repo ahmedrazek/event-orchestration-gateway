@@ -5,11 +5,12 @@ import { WebhookController } from './webhook.controller';
 import { SignatureGuard } from 'src/guards/signature.guard';
 import { SignatureService } from 'src/utils/signature.service';
 import { EventQueue } from './event.queue';
-import { EVENT_QUEUE } from './event-queue.constant';
+import { DLQ_QUEUE, EVENT_QUEUE } from './event-queue.constant';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EventLogSchema } from './schema/event-log.schema';
 import { ShipmentSchema } from './schema/shipment.schema';
 import { EventProcessor } from './event.process';
+import { EventDlqProcessor } from './event.dlq.process';
 
 @Module({
   imports: [
@@ -23,17 +24,27 @@ import { EventProcessor } from './event.process';
         schema: ShipmentSchema,
       },
     ]),
-    BullModule.registerQueue({
-      name: EVENT_QUEUE,
-      defaultJobOptions: {
-        removeOnComplete: true,
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 3000,
+    BullModule.registerQueue(
+      {
+        name: EVENT_QUEUE,
+        defaultJobOptions: {
+          removeOnComplete: true,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 3000,
+          },
         },
       },
-    }),
+      {
+        name: DLQ_QUEUE,
+        defaultJobOptions: {
+          attempts: 1,
+          removeOnComplete: false,
+          removeOnFail: false,
+        },
+      },
+    ),
   ],
   controllers: [WebhookController],
   providers: [
@@ -42,6 +53,7 @@ import { EventProcessor } from './event.process';
     SignatureService,
     EventQueue,
     EventProcessor,
+    EventDlqProcessor,
   ],
 })
 export class WebhookModule {}

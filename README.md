@@ -2,20 +2,6 @@
 
 NestJS webhook gateway that validates signed events, enqueues them in BullMQ, and processes them asynchronously with a worker.
 
-## Coverage Summary
-
-| Area | Status in this project |
-| --- | --- |
-| Architecture overview | Implemented |
-| How to run (`docker compose up`) | Implemented |
-| Webhook signature format | Implemented |
-| Queue + worker concurrency strategy | Implemented |
-| Retry + exponential backoff | Implemented |
-| Idempotency design | Partially implemented |
-| DLQ strategy | Not implemented |
-| Eventual consistency | Implemented (required) |
-| Load test steps + evidence | Implemented (required) |
-
 ## Architecture Overview
 
 ### Components
@@ -23,7 +9,10 @@ NestJS webhook gateway that validates signed events, enqueues them in BullMQ, an
 - API endpoint: `POST /webhook/event`
 - Signature validation: `SignatureGuard` + `SignatureService` (HMAC-SHA256 over raw body bytes)
 - Queue: BullMQ queue `webhook-event-queuee` (Redis-backed)
-- Worker: `EventProcessor` (BullMQ processor)
+- DLQ: BullMQ queue `webhook-event-dlq` (Redis-backed)
+- Workers:
+  - `EventProcessor` for main queue processing
+  - `EventDlqProcessor` for DLQ auto-replay processing
 - MongoDB collections:
   - `EventLog` for event processing state
   - `Shipment` for shipment projection state
@@ -144,6 +133,7 @@ const sig = crypto
 ### Practical Strategy
 
 - API returns `202` quickly and offloads processing to background worker.
+- Ingestion path only enqueues to Redis and does not query MongoDB.
 - Worker concurrency is fixed at 5 to bound parallel downstream calls.
 - BullMQ retries handle transient failures from routing logic.
 
@@ -166,37 +156,52 @@ After retries are exhausted, jobs stay in failed state unless cleaned manually (
 
 ### Current Design
 
-- Queue job key: `jobId = event-${eventId}-${status}`
+- Queue job key: `jobId = event-${eventId}`
 - Mongo unique index: `EventLog.eventId`
 - Mongo unique index: `Shipment.shipmentId`
 
 ### Current Behavior
 
-- If same job exists in `active`, API returns `Already processing`.
-- If same job exists in `delayed` or `failed`, existing job is removed and re-enqueued.
-- For `created` events, shipment creation checks for existing `(shipmentId, orderId)` record before insert.
+- Duplicate deliveries with the same `eventId` resolve to the same BullMQ `jobId`.
+- Worker checks `EventLog` before processing; already-processed events are skipped.
+- Mongo event/shipment state reads and writes happen in worker flow, not ingestion flow.
 
 ### Known Limitations
 
-- Completed jobs are removed (`removeOnComplete: true`), so queue state alone cannot block replay of already-completed events.
-- No separate long-lived deduplication store or replay window is implemented.
+- No timestamp/nonce replay window is implemented at signature layer.
 
 ## DLQ Strategy
 
 ### Current Status
 
-Not implemented in this codebase.
+Implemented with a dedicated BullMQ queue: `webhook-event-dlq`.
 
-### Current Failure Handling
+### Handoff Rules
 
-- Failed processing updates `EventLog.status` to `failed` with `lastError`.
-- Failed jobs remain in BullMQ failed state (not routed to a dedicated dead-letter queue).
+- Worker retries still run on the main queue (`attempts: 3`, exponential backoff).
+- DLQ handoff happens only on terminal failure (`job.attemptsMade >= job.opts.attempts`).
+- DLQ dedup key format: `dlq-event-${eventId}`.
+- If a DLQ job with the same key already exists, it is replaced with the latest failure payload.
+- Auto replay delay: `300000ms` (`5 minutes`) when replay budget is available.
+- Max auto replay cycles: `1` (`replayCount < maxReplayCount`).
+- When replay budget is exhausted, DLQ job is parked in failed state for investigation.
 
-### Gap To Close
+### DLQ Payload
 
-- Add dedicated DLQ queue (for example `webhook-event-dlq`) and replay workflow for operational recovery.
+Each DLQ message stores:
 
-## Eventual Consistency (Required)
+- `event` (original event payload)
+- `sourceQueue`
+- `sourceJobId`
+- `attemptsMade`
+- `maxAttempts`
+- `failedReason`
+- `failedAt`
+- `replayCount`
+- `maxReplayCount`
+- optional `replayedAt`
+
+## Eventual Consistency
 
 Implemented by design:
 
@@ -205,38 +210,3 @@ Implemented by design:
 - `EventLog` and `Shipment` are eventually updated after queue processing/retries.
 
 Implication: callers should treat `202` as accepted-for-processing, not completed.
-
-## Load Test Steps + Evidence (Required)
-
-### Steps
-
-1. Start stack:
-
-```bash
-docker compose up -d --build
-```
-
-2. Run load test:
-
-```bash
-node scripts/loadtest-webhook.js --connections=80 --duration=20
-```
-
-3. Optional custom run:
-
-```bash
-node scripts/loadtest-webhook.js --url=http://localhost:3000/webhook/event --secret=<WEBHOOK_SECRET> --connections=100 --duration=15
-```
-
-### Evidence (Captured Locally)
-
-- Run date: `2026-02-24`
-- Command: `node scripts/loadtest-webhook.js --connections=80 --duration=20`
-- Status counts: `{ '202': 4757 }`
-- Non-202 responses: `0`
-- Average latency: `332.66 ms`
-- P99 latency: `479 ms`
-- Average throughput: `237.85 req/sec`
-- Total requests: about `5k` in `20.18s`
-
-Interpretation: ingress remained stable for this run (all `202`). This validates intake performance only; it is not full end-to-end business correctness evidence.
