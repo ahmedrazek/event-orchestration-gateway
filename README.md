@@ -210,3 +210,11 @@ Implemented by design:
 - `EventLog` and `Shipment` are eventually updated after queue processing/retries.
 
 Implication: callers should treat `202` as accepted-for-processing, not completed.
+
+## Proof of Load
+
+Evidence screenshots for 100 concurrent load verification:
+
+![Load Test Result](./Screenshot%202026-02-25%20133522.png)
+
+![Load Test Summary](./Screenshot%202026-02-25%20133541.png)
