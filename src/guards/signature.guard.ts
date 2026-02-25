@@ -11,7 +11,6 @@ export class SignatureGuard implements CanActivate {
       .switchToHttp()
       .getRequest<Request & { rawBody?: Buffer }>();
     const sig = req.header('x-signature');
-
     this.sigService.verify(req.rawBody ?? Buffer.from(''), sig || undefined);
     return true;
   }

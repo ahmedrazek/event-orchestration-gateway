@@ -1,98 +1,242 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Event Orchestration Gateway
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+NestJS webhook gateway that validates signed events, enqueues them in BullMQ, and processes them asynchronously with a worker.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Coverage Summary
 
-## Description
+| Area | Status in this project |
+| --- | --- |
+| Architecture overview | Implemented |
+| How to run (`docker compose up`) | Implemented |
+| Webhook signature format | Implemented |
+| Queue + worker concurrency strategy | Implemented |
+| Retry + exponential backoff | Implemented |
+| Idempotency design | Partially implemented |
+| DLQ strategy | Not implemented |
+| Eventual consistency | Implemented (required) |
+| Load test steps + evidence | Implemented (required) |
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Architecture Overview
 
-## Project setup
+### Components
 
-```bash
-$ npm install
+- API endpoint: `POST /webhook/event`
+- Signature validation: `SignatureGuard` + `SignatureService` (HMAC-SHA256 over raw body bytes)
+- Queue: BullMQ queue `webhook-event-queuee` (Redis-backed)
+- Worker: `EventProcessor` (BullMQ processor)
+- MongoDB collections:
+  - `EventLog` for event processing state
+  - `Shipment` for shipment projection state
+- Redis: queue broker and job state store
+
+### Request Flow
+
+```text
+Client
+  -> POST /webhook/event
+  -> SignatureGuard verifies x-signature
+  -> EventQueue.addEventToQueue()
+  -> BullMQ queue (Redis)
+  -> EventProcessor worker
+  -> WebhookService.routingEvent() (simulated async downstream call)
+  -> EventLog updated to processed/failed
 ```
 
-## Compile and run the project
+## How To Run (`docker compose up`)
 
-```bash
-# development
-$ npm run start
+### Prerequisites
 
-# watch mode
-$ npm run start:dev
+- Docker Desktop (or Docker Engine + Compose plugin)
 
-# production mode
-$ npm run start:prod
+### Start
+
+1. From project root, optionally set a custom secret:
+
+```powershell
+$env:WEBHOOK_SECRET = "change-me-to-a-strong-secret"
 ```
 
-## Run tests
+2. Start services:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+docker compose up -d --build
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+3. Check status:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+docker compose ps
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+4. API base URL:
 
-## Resources
+```text
+http://localhost:3000
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+### Stop
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+docker compose down
+```
 
-## Support
+### Common Local Issue
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+If Redis port `6379` is already in use:
 
-## Stay in touch
+```text
+Bind for 0.0.0.0:6379 failed: port is already allocated
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Change Redis mapping in `docker-compose.yml` from `6379:6379` to a free host port such as `6380:6379`.
 
-## License
+## Webhook Signature Format
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+### Header
+
+```text
+x-signature: sha256=<hex_digest>
+```
+
+### Digest Formula
+
+```text
+hex_digest = HMAC_SHA256(raw_request_body_bytes, WEBHOOK_SECRET)
+```
+
+Important: verification is performed on the exact raw request body bytes captured by Express body parser `verify` hooks.
+
+### Example (Node.js)
+
+```js
+const crypto = require('node:crypto');
+
+const body = JSON.stringify({
+  eventId: 'evt-1',
+  status: 'created',
+  shipmentId: 'ship-1',
+  orderId: 'order-1',
+});
+
+const sig = crypto
+  .createHmac('sha256', process.env.WEBHOOK_SECRET)
+  .update(body)
+  .digest('hex');
+
+// send: x-signature: sha256=<sig>
+```
+
+## Queue + Worker Concurrency Strategy
+
+### Queue Configuration
+
+- Queue name: `webhook-event-queuee`
+- `removeOnComplete: true`
+- `attempts: 3`
+- Backoff: exponential, base delay `3000ms`
+
+### Worker Configuration
+
+- `concurrency: 5`
+- `stalledInterval: 120000`
+- `maxStalledCount: 30`
+
+### Practical Strategy
+
+- API returns `202` quickly and offloads processing to background worker.
+- Worker concurrency is fixed at 5 to bound parallel downstream calls.
+- BullMQ retries handle transient failures from routing logic.
+
+## Retry + Exponential Backoff
+
+Configured through BullMQ default job options:
+
+- Total attempts: `3`
+- Backoff: `exponential` with base delay `3000ms`
+
+Approximate retry timing:
+
+- Attempt 1: immediate
+- Retry 1: around `+3s`
+- Retry 2: around `+6s`
+
+After retries are exhausted, jobs stay in failed state unless cleaned manually (`removeOnFail` is not set to auto-remove).
+
+## Idempotency Design
+
+### Current Design
+
+- Queue job key: `jobId = event-${eventId}-${status}`
+- Mongo unique index: `EventLog.eventId`
+- Mongo unique index: `Shipment.shipmentId`
+
+### Current Behavior
+
+- If same job exists in `active`, API returns `Already processing`.
+- If same job exists in `delayed` or `failed`, existing job is removed and re-enqueued.
+- For `created` events, shipment creation checks for existing `(shipmentId, orderId)` record before insert.
+
+### Known Limitations
+
+- Completed jobs are removed (`removeOnComplete: true`), so queue state alone cannot block replay of already-completed events.
+- No separate long-lived deduplication store or replay window is implemented.
+
+## DLQ Strategy
+
+### Current Status
+
+Not implemented in this codebase.
+
+### Current Failure Handling
+
+- Failed processing updates `EventLog.status` to `failed` with `lastError`.
+- Failed jobs remain in BullMQ failed state (not routed to a dedicated dead-letter queue).
+
+### Gap To Close
+
+- Add dedicated DLQ queue (for example `webhook-event-dlq`) and replay workflow for operational recovery.
+
+## Eventual Consistency (Required)
+
+Implemented by design:
+
+- `POST /webhook/event` returns `202 Accepted` after enqueue, not after business completion.
+- Worker processes asynchronously and updates persistence later.
+- `EventLog` and `Shipment` are eventually updated after queue processing/retries.
+
+Implication: callers should treat `202` as accepted-for-processing, not completed.
+
+## Load Test Steps + Evidence (Required)
+
+### Steps
+
+1. Start stack:
+
+```bash
+docker compose up -d --build
+```
+
+2. Run load test:
+
+```bash
+node scripts/loadtest-webhook.js --connections=80 --duration=20
+```
+
+3. Optional custom run:
+
+```bash
+node scripts/loadtest-webhook.js --url=http://localhost:3000/webhook/event --secret=<WEBHOOK_SECRET> --connections=100 --duration=15
+```
+
+### Evidence (Captured Locally)
+
+- Run date: `2026-02-24`
+- Command: `node scripts/loadtest-webhook.js --connections=80 --duration=20`
+- Status counts: `{ '202': 4757 }`
+- Non-202 responses: `0`
+- Average latency: `332.66 ms`
+- P99 latency: `479 ms`
+- Average throughput: `237.85 req/sec`
+- Total requests: about `5k` in `20.18s`
+
+Interpretation: ingress remained stable for this run (all `202`). This validates intake performance only; it is not full end-to-end business correctness evidence.

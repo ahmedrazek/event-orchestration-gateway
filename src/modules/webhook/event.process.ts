@@ -21,17 +21,34 @@ export class EventProcessor extends WorkerHost {
   }
 
   async process(job: Job<EventDto>) {
+    console.log('job start processing', job.id);
     await this.webhookService.routingEvent(job.data);
-    return this.webhookService.processEvent(job.data);
+  }
+
+  @OnWorkerEvent('completed')
+  async onCompleted(job: Job<EventDto>) {
+    await this.eventLogModel
+      .updateOne(
+        { eventId: job.data.eventId },
+        { $set: { status: 'processed', lastError: null } },
+      )
+      .exec();
   }
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<EventDto>, error: Error) {
+    console.log('job is failed', job.id);
     await this.eventLogModel
       .updateOne(
         { eventId: job.data.eventId },
         {
-          $set: { status: 'failed', lastError: error.message },
+          $set: {
+            status: 'failed',
+            lastError: error.message,
+            $inc: {
+              attempts: 1,
+            },
+          },
         },
       )
       .exec();

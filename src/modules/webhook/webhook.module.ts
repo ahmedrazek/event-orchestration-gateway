@@ -9,6 +9,7 @@ import { EVENT_QUEUE } from './event-queue.constant';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EventLogSchema } from './schema/event-log.schema';
 import { ShipmentSchema } from './schema/shipment.schema';
+import { EventProcessor } from './event.process';
 
 @Module({
   imports: [
@@ -35,6 +36,12 @@ import { ShipmentSchema } from './schema/shipment.schema';
     }),
   ],
   controllers: [WebhookController],
-  providers: [WebhookService, SignatureGuard, SignatureService, EventQueue],
+  providers: [
+    WebhookService,
+    SignatureGuard,
+    SignatureService,
+    EventQueue,
+    EventProcessor,
+  ],
 })
 export class WebhookModule {}

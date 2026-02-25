@@ -1,1 +1,1 @@
-export const EVENT_QUEUE = 'webhook-event-queue';
+export const EVENT_QUEUE = 'webhook-event-queuee';
